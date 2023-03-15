@@ -1,0 +1,215 @@
+---
+title: "560 Group Project: Models"
+author: "Brittany Jones, Tess Abrahamson-Richards, Natalie Turner, Hanyi Wang"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message = FALSE,warning = FALSE)
+library(tidyverse)
+library(mlmRev)
+library(lme4)
+library(arm)
+library(haven)
+library(table1)
+library(Hmisc)
+library(ggplot2)
+library(ggpubr)
+library(expss)
+## ------------- working directories for Hanyi ----------
+wd_hanyi = '/Users/hanyiwang/Desktop/Social-Service-Participation-Among-Older-Adult-Women-in-Washington-State'
+path_hanyi = c("../SIPPdata/sipp.csv")
+
+## ------------- read data ----------
+setwd(wd_hanyi)
+sipp = read.csv(path_hanyi)
+
+## ------------- data cleaning ----------
+sipp = sipp %>%
+  mutate(MONTH.num = as.numeric(MONTHCODE)) %>%
+  mutate(UQID = factor(UQID)) %>%
+  mutate(HI.log = log(HI + .0001)) # add 0.0001 to avoid 0
+```
+
+
+
+## Models fitting
+
+- Model 0: Random Intercepts, no covariates.
+
+- Model 1: Random Intercepts, with main IV.
+
+- Model 2: Random Intercepts, with demographic covariates, shared slopes. 
+
+- Model 3: Random Intercepts, with demographic + health status covariates, shared slopes. 
+
+- Model 4: Random Intercepts, with main IV, demographic + health status + time. 
+
+- Model 5: Random Intercepts, with main IV, demographic + health status + time shared + time^2. 
+
+- Model 6: Random Intercepts, with main IV, demographic + health status + time shared + time^2 + varying time. 
+
+- Model 7: Random Intercepts, with main IV, demographic + health status + time shared + time^2 + varying time slopes and time^2 slopes.
+
+```{r}
+# Model 0: Random Intercepts, no covariates
+M0 <- lmer(SS_SCORE ~ 1 + (1 | UQID), data = sipp)
+
+# Model 1: Random Intercepts, with main IV 
+M1 <- lmer(SS_SCORE ~ 1 + (HI.log) + (1 | UQID), data = sipp)
+
+# Model 2: Random Intercepts, with demographic covariates, shared slopes
+M2 <- lmer(SS_SCORE ~ 1 + (HI.log) + TAGE + TRACE + EORIGIN + EEDUC + (1 | UQID), data = sipp)
+
+# Model 3: Random Intercepts, with demographic + health status covariates, shared slopes
+M3 <- lmer(SS_SCORE ~ 1 + (HI.log) + TAGE + TRACE + EORIGIN + EEDUC + EHLTSTAT + (1 | UQID), data = sipp)
+
+# Model 4: Random Intercepts, with main IV, demographic + health status + time
+M4 <- lmer(SS_SCORE ~ 1 + (HI.log) + TAGE + TRACE + EORIGIN + EEDUC + EHLTSTAT + 
+             MONTH.num + (1 | UQID), data = sipp)
+
+# Model 5: Random Intercepts, with main IV, demographic + health status + time shared + time^2  
+M5 <- lmer(SS_SCORE ~ 1 + (HI.log) + TAGE + TRACE + EORIGIN + EEDUC + EHLTSTAT + 
+             MONTH.num + I(MONTH.num^2) + (1 | UQID), data = sipp)
+
+# Model 6: Random Intercepts, with main IV, demographic + health status + time shared + time^2 + varying time slopes  
+M6 <- lmer(SS_SCORE ~ 1 + (HI.log) + TAGE + ERACE + EORIGIN + EEDUC + EHLTSTAT + 
+             MONTH.num + I(MONTH.num^2) + (1 + MONTH.num | UQID), data = sipp)
+
+# Model 7: Random Intercepts, with main IV, demographic + health status + time shared + time^2 + varying time slopes and time^2 slopes
+M7 <- lmer(SS_SCORE ~ 1 + (HI.log) + TAGE + TRACE + EORIGIN + EEDUC + EHLTSTAT +
+           MONTH.num + I(MONTH.num^2) + (1 + MONTH.num +I(MONTH.num^2)| UQID), data = sipp)
+```
+
+## Models selection based on BIC and AIC
+
+```{r out.width = "70%",fig.align='center',fig.cap='AIC and BIC for the 7 models'}
+aic.bic = data.frame(
+  models = 0:7,
+  df = AIC(M0, M1, M2, M3, M4, M5, M6,M7)$df,
+  AIC = AIC(M0, M1, M2, M3, M4, M5, M6,M7)$AIC,
+  BIC = BIC(M0, M1, M2, M3, M4, M5, M6,M7)$BIC)
+  
+knitr::kable(aic.bic,caption = 'AIC and BIC for the 7 models')
+
+ggplot(aic.bic,aes(x = models,y=AIC)) +
+  geom_point(aes(x = models,y=AIC,color = "AIC")) +
+  geom_line(aes(x = models,y=AIC,color = "AIC")) + 
+  geom_point(aes(x = models,y=BIC,color = "BIC")) + 
+  geom_line(aes(x = models,y=BIC,color = "BIC")) + 
+  labs(x = "models",y = "") +
+  scale_colour_manual(name="",values=c("AIC"="#00AFBB","BIC"="#FC4E07")) +
+  scale_x_continuous(breaks=seq(0,7,by=1))
+
+```
+
+## Results 
+
+### Interpretion
+
+```{r echo = TRUE}
+# # point estimates of shared coefficients
+# fixef(M6)
+
+## Within-group variance (residual variance)
+sigma(M6)^2
+
+# between-group variance: 0.4957805^2
+VarCorr(M6)
+
+## Between-school variance
+# variance of sample means
+
+```
+
+
+### p-values 
+
+```{r fig.align='center',fig.cap='Model parameters and CIs',out.width="70%"}
+# summary(M6) # find t values
+pvalues = data.frame( 
+  covariates = c("log(Health costs)","Month","Month^2",
+                 "Race: Black alone","Race: Residual","Race: White alone"),
+  coefficient = c(-4.545e-03,3.641e-02,-2.855e-03,1.258e-01,6.292e-03,-7.149e-02 ),
+  pvalues = c(2*pt(-8.232,df=39-1) ,2*pt(34.921,df=39-1), 2*pt(-36.579,df=39-1),
+              2*pt(5.224,df=39-1) ,2*pt(0.189,df=39-1) ,2*pt(-3.451,df=39-1)))
+
+pvalues$pvalues = formatC(pvalues$pvalues, format = "e", digits = 3)
+knitr::kable(pvalues,caption = 'p values for covariates of interest')
+
+# fixef(M6)
+
+ptEstAndCIs <- data.frame(
+  coef(M6)$UQID[,"(Intercept)"],
+  coef(M6)$UQID[,"(Intercept)"]-se.ranef(M6)$UQID[,"(Intercept)"]*1.96,
+  coef(M6)$UQID[,"(Intercept)"]+se.ranef(M6)$UQID[,"(Intercept)"]*1.96
+)
+
+colnames(ptEstAndCIs) <- c("RE_ests","RE_L","RE_U")
+
+plot(x = 1:nrow(ptEstAndCIs),
+     y = ptEstAndCIs$RE_ests,
+     ylim = range(ptEstAndCIs$RE_L, ptEstAndCIs$RE_U),
+     xlab = "Participants",
+     ylab = expression(paste(alpha[j])),
+     pch = 20)
+segments(x0 = 1:nrow(ptEstAndCIs),
+         y0 = ptEstAndCIs$RE_L, y1 = ptEstAndCIs$RE_U, lwd = 2)
+
+```
+
+
+### SS_SCORE over months
+
+the density of social score utilization minimum points for all participants
+
+```{r fig.align='center',fig.cap='Density of social score utilization minimum points for individuals'}
+axis.sym.vec = -(coef(M6)$UQID[27])/(2*coef(M6)$UQID[28])
+axis.sym.vec = data.frame(peak = array(axis.sym.vec[[1]]))
+
+hist(axis.sym.vec$peak,xlim=c(0,12),xlab = "",main = "")
+plot(density(axis.sym.vec$peak),xlim=c(0,12),xlab = "Month",main = "")
+
+```
+
+Mean of social utilization scores for each month calculated from the dataset, compared to the prediction of each month’s mean SS scores for a (orange) white woman who’s not spanish, hispanic or latino, with a highest degree of 7th or 8th grade, in good health status, and has a health cost of 1230 (mean value) and an age of 67 (mean value)
+
+
+```{r fig.align='center',fig.cap="Mean of SS scores for each month based on the data and model prediction"}
+months.mean = c()
+for (i in 1:12){months.mean[i] = sipp %>% filter(MONTHCODE==i) %>% dplyr::select(SS_SCORE) %>% mean() }
+ 
+# sipp %>% dplyr::select(HI) %>% mean()
+# sipp %>% dplyr::select(TAGE) %>% mean()
+# summary(M6)[["coefficients"]]
+month = c(1,2,3,4,5,6,7,8,9,10,11,12)
+model.pred = 0.258358491 - 0.004544700 * (log(1230)) - 0.002060997*(67) -0.071489698 - 0.050425209 + 0.253066929 + 0.172647803 - 0.036408540* month + 0.002855227*(month^2)
+
+ss.mean = data.frame(
+  months = 1:12,
+  data = months.mean,
+  model = model.pred)
+
+ggplot(ss.mean,aes(x = months,y=data)) +
+  geom_point(aes(x = months,y=data,color = "data")) +
+  geom_line(aes(x = months,y=data,color = "data")) + 
+  geom_point(aes(x = months,y=model,color = "model prediction")) + 
+  geom_line(aes(x = months,y=model,color = "model prediction")) + 
+  labs(x = "Months",y = "Mean SS Scores") +
+  scale_colour_manual(name="",values=c("data"="#00AFBB","model prediction"="#FC4E07")) + 
+  xlim(0,12)+scale_x_continuous(breaks=seq(0,12,by=1))+ 
+  ylim(0,6)+ theme(legend.position = "top")
+
+# plot(months.mean,type = "o",xlim=c(0,12),xlab = "Month",ylab = "SS Score",main = "")
+
+```
+
+
+
+\newpage
+## Code Appendix
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE,include=TRUE}
+```

@@ -1,0 +1,240 @@
+---
+title: "560 Group Project: Descriptive Statistics"
+author: "Brittany Jones, Tess Abrahamson-Richards, Natalie Turner, Hanyi Wang"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message = FALSE,warning = FALSE)
+library(tidyverse)
+library(mlmRev)
+library(lme4)
+library(arm)
+library(haven)
+library(table1)
+library(Hmisc)
+library(ggplot2)
+library(ggpubr)
+library(expss)
+library(dplyr)
+library(gridExtra)
+library(flextable)
+
+## ------------- working directories for Hanyi ----------
+wd_hanyi = '/Users/hanyiwang/Desktop/Social-Service-Participation-Among-Older-Adult-Women-in-Washington-State'
+path_hanyi = c("../SIPPdata/sipp.csv")
+
+## ------------- read data ----------
+setwd(wd_hanyi)
+sipp = read.csv(path_hanyi)
+
+unique = sipp %>% distinct(UQID, .keep_all=TRUE) # unique participants
+
+```
+
+## Population of Interest
+
+Filter by women over 50 years old in the SIPP study, there are `r nrow(sipp)` entries, and `r nrow(unique)` unique participants in our dataset.
+
+## Key Variables
+
+### Outcome: Monthly social service utilization
+
+(The following variables are all binary variables with levels "Yes" or "No". We count each "Yes" as 1 point and calculate the monthly social service utilization for each participant.)
+
+- `RGA_MNYN`: Received GA benefits this month
+
+- `RSNAP_MNYN`: Received SNAP benefits this month
+
+- `RSSI_MNYN`: Received SSI benefits this month
+
+- `RTANF_MNYN`: Received TANF benefits this month
+
+- `RWIC_MNYN`: Received WIC benefits this month
+
+- `ECHLD_MNYN`: Received child care service assistance to go to work or school training this month (1-12)
+
+- `ECVDMNYN`: Received the EIP(s), or stimulus check(s) this month (1-12)
+
+- `EOTHAS_MNYN`: Received other (clothing or housing) assistance this month (1-12)
+
+- `ETRANS_MNYN`: Received transportation assistance this month (1-12)
+
+- `EUC1MNYN`: Received regular, government-provided Unemployment Compensation payments in this month of the reference period (1- 12)
+
+- `EUC2MNYN`: Received supplemental, employer-provided Unemployment Compensation payments in this month of the reference period (1- 12)
+
+- `EUC3MNYN`: Received other Unemployment Compensation payments, including union benefits, in this month of the reference period (1- 12)
+
+```{r}
+table1(~ECHLD_MNYN+ECVDMNYN+EUC1MNYN+EUC2MNYN+EUC3MNYN,data = sipp)
+```
+
+         
+As shown above, variables `ECHLD_MNYN`, `ECVDMNYN`, `EUC1MNYN`, `EUC2MNYN`, `EUC3MNYN` have a lot of missing values, so we exclude them from the calculation of social service utilization scores. Thus the monthly social service utilization score for a participant can be 0 to 7. 
+
+### Covariates fitted in the models
+
+Demographic vairables:
+
+- `ESEX`: sex (all "female" based on our inclusion criteria, so will not be in the models)
+                    
+- `TRACE`: detailed race
+
+- `EORIGIN`: is Spanish, Hispanic, or Latino, or not
+
+- `EEDUC`: highest level of school completed or the highest degree received by December of (reference year)
+               
+- `EHLTSTAT`: self-reported health status (Confounder)
+
+
+Individual's total cost of health care `HI` (sum of the following 2 variables)
+
+- `TMDPAY`: non-premium medical out-of-pocket expenditures on medical care
+
+- `TOTCMDPAY`: non-premium medical out-of-pocket expenditures for over-the-counter health-related products
+
+```{r}
+## ------------- modify data set ----------
+sipp = sipp %>%
+  mutate(SS_SCORE = factor(SS_SCORE)) %>%
+  mutate(MONTHCODE = factor(MONTHCODE))
+  
+## ------------- modify labels and units ----------
+unique = apply_labels(unique, 
+                    ESEX = "Sex",
+                    ERACE = "Race",
+                    TRACE = "Detailed race",
+                    EORIGIN = "Is Spanish, Hispanic, or Latino",
+                    EEDUC = "Highest degree",
+                    EHLTSTAT = "Health status")
+
+sipp = apply_labels(sipp, 
+                    SS_SCORE = "Monthly social service utilization",
+                    HI = "Health care utilization")
+
+
+units(sipp$HI) = "dollars"
+units(sipp$SS_SCORE) = "score"
+```
+
+## Descriptive Statistics
+
+```{r}
+## ------------- descriptive tables ----------
+demographic = table1(~+TRACE+EORIGIN+EEDUC+EHLTSTAT,data=unique, caption = "Demographic charactersitics for older adult women in the SIPP study")
+
+ss_score = table1(~(SS_SCORE),data=sipp, caption = "Social service utilization for older adult women in the SIPP study")
+
+hi = table1(~HI,data=sipp, caption = "Health care spending for older adult women in the SIPP study")
+
+# t1flex(demographic) %>% save_as_docx(path="demographic.docx")
+
+demographic
+ss_score
+hi
+```
+
+```{r out.width="70%",fig.align="center",fig.cap='Social service utilization for different healthcare cost'}
+## ------------- SS_SCORE VS HI ----------
+ggplot(sipp,aes(x=HI,y=SS_SCORE)) +
+  geom_point() +
+  labs(y = "Social service utilization score", x = "Healthcare costs")
+
+```
+
+```{r fig.align="center",fig.cap='Histogram of social service utilization for different races'}
+
+## ------------- SS_SCORE VS race ----------
+ggplot(sipp, aes(x=(SS_SCORE), color=ERACE,fill=ERACE)) + 
+  geom_histogram(position = "dodge", binwidth=2,stat="count") +
+  labs(x = "Social service utilization score") +  
+  theme(legend.position="top") 
+
+```
+
+We also studied the relationship of social service utilization for each individual and month. We first used a histogram and found that there's no significant difference for the distribution of social service utilization scores over different months. (**Figure 3**)
+
+```{r out.width="70%",fig.align="center",fig.cap='Social service utilization distribution over 12 months'}
+## ------------- SS_SCORE VS month ----------
+#### boxplot
+ggplot(sipp, aes(x=(MONTHCODE), color=SS_SCORE,fill=SS_SCORE)) +
+  geom_histogram(position = "dodge", binwidth=2,stat="count") +
+  labs(x = "Social service utilization score ") +
+  theme(legend.position="top")
+```
+
+We then made a plot of all participants' social service utilization scores over months, and found a lot of overlapping. (**Figure 4**)
+
+```{r out.width="70%",fig.align="center",fig.cap='Social service utilization changes over 12 months for all participants'}
+#### all individuals
+sipp = sipp %>%
+  mutate(SS_SCORE = as.numeric(SS_SCORE)) %>%
+  mutate(MONTHCODE = as.numeric(MONTHCODE)) %>%
+  mutate(UQID = factor(UQID))
+
+
+ggplot(sipp,  aes(x = MONTHCODE,y = SS_SCORE,color = UQID)) +
+  geom_point()+ geom_line() +
+  ylim(0,5) + theme(legend.position = "none") + scale_x_continuous(breaks=seq(0,12,by=1)) +
+  labs(y = "Social service utilization score",x = "Month")
+
+
+#### randomly pick individuals
+# rd = sample(nrow(unique), 30)
+# sipp_rd = sipp[sipp$UQID %in% unique[rd,]$UQID,]
+# sipp_rd = sipp_rd %>%
+#   mutate(SS_SCORE = as.numeric(SS_SCORE)) %>%
+#   mutate(MONTHCODE = as.numeric(MONTHCODE)) %>%
+#   mutate(UQID = factor(UQID))
+# 
+# ggplot(sipp_rd,  aes(x = MONTHCODE,y = SS_SCORE,color = UQID)) +
+#   geom_point()+
+#   geom_line() +
+#   ylim(0,5) +
+#   theme(legend.position = "none")
+
+```
+
+```{r out.width="130%",fig.align="center",fig.cap='Social service utilization changes over 12 months for participants with a change'}
+#### all individuals in seperate plots
+
+# p = list()
+# for (i in 1:30){
+#   sipp_rd = sipp[sipp$UQID == factor(unique$UQID)[i+1000],]
+#   p[[i]] = ggplot(sipp_rd,  aes(x = MONTHCODE,y = SS_SCORE)) +  
+#     geom_point()+ geom_line() + ylim(0,5) + scale_x_continuous(breaks=seq(0,12,by=3))
+# }
+# 
+# do.call(grid.arrange,p)
+
+
+# after carefully screening the individuals, we found most participants have this trend of having a smaller score around summer, and a larger score over spring and fall. We randomly picked some of the participants shown here as an illustration of the trends.
+
+in_ch = c(9, 6,16,45, 57,319,71,67, 80,94,95,117, 315,316,1013,1015)
+
+p = list()
+for (i in 1:length(in_ch)){
+  sipp_rd = sipp[sipp$UQID == factor(unique$UQID)[in_ch[i]],]
+  p[[i]] = ggplot(sipp_rd,  aes(x = MONTHCODE,y = SS_SCORE)) +  
+    geom_point()+ geom_line() + ylim(0,5) + scale_x_continuous(breaks=seq(0,12,by=3)) +
+    labs(y = "SS score",x = "Month")
+
+}
+
+do.call(grid.arrange,p)
+
+
+
+```
+
+
+To study the difference in more details, we went ahead to make a single plot for the trend for each participant. After carefully screening, we found most participants have the trend of having a smaller score around summer, and a larger score over spring and fall. We randomly picked some of the participants shown here as an illustration of the trends. (**Figure 5**) This trend further instructed us to put month as a covariate in our models.
+
+
+## Code Appendix
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE,include=TRUE}
+```
